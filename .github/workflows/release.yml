@@ -1,0 +1,47 @@
+name: "Release Validation"
+
+on:
+  pull_request:
+    branches:
+      - release
+  push:
+    branches:
+      - release
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+
+jobs:
+  validation:
+    name: "Validação Final"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.6.0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Full Infrastructure Test
+        working-directory: ./IAC
+        run: |
+          terraform init
+          terraform validate
+          terraform plan
+
+      - name: System Tests
+        working-directory: ./app
+        run: |
+          pip install pytest pytest-cov
+          python -m pytest tests/
+          python main.py

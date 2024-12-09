@@ -1,0 +1,78 @@
+name: "Infraestutura e Upload do arquivo CSV"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: "Deploy da infraestrutura e Upload dos Dados"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.6.0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Check S3 Buckets
+        id: check_buckets
+        run: |
+          echo "Verificando bucket contábil..."
+          aws s3 ls "s3://ada-contabil-1182" && echo "bucket_contabil_exists=true" >> $GITHUB_OUTPUT || echo "bucket_contabil_exists=false" >> $GITHUB_OUTPUT
+          
+          echo "Verificando bucket de estado..."
+          aws s3 ls "s3://terraform-state-ada-1182" && echo "state_bucket_exists=true" >> $GITHUB_OUTPUT || echo "state_bucket_exists=false" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init (Local)
+        working-directory: ./IAC
+        run: |
+          echo "Removendo backend.tf se existir..."
+          rm -f backend.tf
+          echo "Inicializando Terraform localmente..."
+          terraform init
+
+      - name: Terraform Import (if buckets exist)
+        working-directory: ./IAC
+        if: steps.check_buckets.outputs.bucket_contabil_exists == 'true' || steps.check_buckets.outputs.state_bucket_exists == 'true'
+        run: |
+          if [ "${{ steps.check_buckets.outputs.bucket_contabil_exists }}" == "true" ]; then
+            echo "Importando bucket contábil..."
+            terraform import aws_s3_bucket.bucket_contabil ada-contabil-1182 || true
+          fi
+          
+          if [ "${{ steps.check_buckets.outputs.state_bucket_exists }}" == "true" ]; then
+            echo "Importando bucket de estado..."
+            terraform import aws_s3_bucket.terraform_state terraform-state-ada-1182 || true
+          fi
+
+      - name: Terraform Apply
+        working-directory: ./IAC
+        run: |
+          echo "Aplicando configuração Terraform..."
+          terraform apply -auto-approve -input=false
+
+      - name: Generate CSV File
+        working-directory: ./app
+        run: python main.py
+
+      - name: Upload CSV to S3
+        run: |
+          echo "Fazendo upload do CSV..."
+          CSV_FILE=$(ls app/contabil_*.csv | head -n 1)
+          aws s3 cp $CSV_FILE "s3://ada-contabil-1182/"
