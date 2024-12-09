@@ -53,3 +53,22 @@ jobs:
         run: |
           python -c "import main"
           python main.py
+
+  
+  merge_to_develop:
+    name: Merge to Develop
+    needs: test
+    if: success()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Merge to Develop
+        run: |
+          git checkout develop
+          git merge origin/feature
+          git push
